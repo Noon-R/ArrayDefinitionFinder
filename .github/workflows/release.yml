@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 1. テスト ────────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet test --configuration Release
+
+  # ── 2. マルチプラットフォームビルド ──────────────────────────────────────────
+  publish:
+    name: Publish (${{ matrix.rid }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [win-x64, linux-x64, osx-x64, osx-arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish self-contained single-file
+        run: |
+          dotnet publish src/ArrayFinder.Cli/ArrayFinder.Cli.csproj \
+            --configuration Release \
+            --runtime ${{ matrix.rid }} \
+            --self-contained \
+            -p:PublishSingleFile=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none \
+            --output dist/${{ matrix.rid }}
+
+      - name: Create archive
+        run: |
+          cd dist/${{ matrix.rid }}
+          zip ../../arrayfinder-${{ github.ref_name }}-${{ matrix.rid }}.zip arrayfinder*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arrayfinder-${{ matrix.rid }}
+          path: arrayfinder-${{ github.ref_name }}-${{ matrix.rid }}.zip
+          if-no-files-found: error
+
+  # ── 3. GitHub Release 作成 ───────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
