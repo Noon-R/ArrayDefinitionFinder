@@ -150,4 +150,71 @@ public class WalkerTests
         Assert.Equal("MyClass", r.ContainingType);
         Assert.Equal("MyMethod", r.ContainingMember);
     }
+
+    // ─── ジェネリック型パラメータのスキップ ──────────────────────────────────
+
+    [Fact]
+    public void Generic_NakedTypeParam_Skipped()
+    {
+        // T[] はスキップ（定義サイドの T）
+        var code = """
+            class Repository<T>
+            {
+                private T[] _items = System.Array.Empty<T>();
+                public T[] GetAll() => _items;
+                public void Process(T[] items) { }
+            }
+            """;
+        var results = Analyze(code);
+        Assert.DoesNotContain(results, r => r.ElementType == "T");
+    }
+
+    [Fact]
+    public void Generic_TypeParamInTypeArg_Skipped()
+    {
+        // List<T>[] のような「型引数に T を含む」ケースもスキップ
+        var code = """
+            using System.Collections.Generic;
+            class C<T>
+            {
+                List<T>[] _groups = new List<T>[3];
+            }
+            """;
+        var results = Analyze(code);
+        Assert.DoesNotContain(results, r => r.ElementType.Contains('T'));
+    }
+
+    [Fact]
+    public void Generic_CallSite_ConcreteType_Detected()
+    {
+        // 呼び出し側では具体型が解決されるので検知されるべき
+        var code = """
+            using System.Linq;
+            using System.Collections.Generic;
+            class C {
+                void M() {
+                    var list = new List<int>();
+                    int[] arr = list.ToArray();  // MethodReturn: int
+                }
+            }
+            """;
+        var results = Analyze(code);
+        Assert.Contains(results, r => r.Kind == ArrayKind.MethodReturn && r.ElementType == "int");
+        Assert.DoesNotContain(results, r => r.ElementType == "T");
+    }
+
+    [Fact]
+    public void Generic_MultipleTypeParams_AllSkipped()
+    {
+        var code = """
+            class C<TKey, TValue>
+            {
+                TKey[] _keys = new TKey[0];
+                TValue[] _vals = System.Array.Empty<TValue>();
+                public TKey[] GetKeys() => _keys;
+            }
+            """;
+        var results = Analyze(code);
+        Assert.DoesNotContain(results, r => r.ElementType is "TKey" or "TValue");
+    }
 }

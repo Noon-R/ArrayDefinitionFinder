@@ -28,13 +28,12 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
     {
         if (node.Parent is not ArrayCreationExpressionSyntax)
         {
-            var typeInfo = _semanticModel.GetTypeInfo(node);
-            var elementTypeName = typeInfo.Type is IArrayTypeSymbol arraySymbol
-                ? arraySymbol.ElementType.ToDisplayString()
-                : node.ElementType.ToString();
-            var rank = typeInfo.Type is IArrayTypeSymbol arr ? arr.Rank : 1;
-
-            AddIfMatches(elementTypeName, ArrayKind.TypeDeclaration, node, rank: rank);
+            if (_semanticModel.GetTypeInfo(node).Type is IArrayTypeSymbol arraySymbol
+                && !HasUnresolvedTypeParameter(arraySymbol.ElementType))
+            {
+                AddIfMatches(arraySymbol.ElementType.ToDisplayString(),
+                    ArrayKind.TypeDeclaration, node, rank: arraySymbol.Rank);
+            }
         }
         base.VisitArrayType(node);
     }
@@ -42,27 +41,23 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
     // new int[] { } / new int[3]
     public override void VisitArrayCreationExpression(ArrayCreationExpressionSyntax node)
     {
-        var typeInfo = _semanticModel.GetTypeInfo(node);
-        var elementTypeName = typeInfo.Type is IArrayTypeSymbol arraySymbol
-            ? arraySymbol.ElementType.ToDisplayString()
-            : node.Type.ElementType.ToString();
-        var rank = typeInfo.Type is IArrayTypeSymbol arr ? arr.Rank : 1;
-
-        AddIfMatches(elementTypeName, ArrayKind.ArrayCreation, node, rank: rank);
+        if (_semanticModel.GetTypeInfo(node).Type is IArrayTypeSymbol arraySymbol
+            && !HasUnresolvedTypeParameter(arraySymbol.ElementType))
+        {
+            AddIfMatches(arraySymbol.ElementType.ToDisplayString(),
+                ArrayKind.ArrayCreation, node, rank: arraySymbol.Rank);
+        }
         base.VisitArrayCreationExpression(node);
     }
 
     // new[] { 1, 2, 3 }
     public override void VisitImplicitArrayCreationExpression(ImplicitArrayCreationExpressionSyntax node)
     {
-        var typeInfo = _semanticModel.GetTypeInfo(node);
-        if (typeInfo.Type is IArrayTypeSymbol arraySymbol)
+        if (_semanticModel.GetTypeInfo(node).Type is IArrayTypeSymbol arraySymbol
+            && !HasUnresolvedTypeParameter(arraySymbol.ElementType))
         {
-            AddIfMatches(
-                arraySymbol.ElementType.ToDisplayString(),
-                ArrayKind.ImplicitCreation,
-                node,
-                rank: arraySymbol.Rank);
+            AddIfMatches(arraySymbol.ElementType.ToDisplayString(),
+                ArrayKind.ImplicitCreation, node, rank: arraySymbol.Rank);
         }
         base.VisitImplicitArrayCreationExpression(node);
     }
@@ -72,13 +67,11 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
     {
         var typeInfo = _semanticModel.GetTypeInfo(node);
         var targetType = typeInfo.ConvertedType ?? typeInfo.Type;
-        if (targetType is IArrayTypeSymbol arraySymbol)
+        if (targetType is IArrayTypeSymbol arraySymbol
+            && !HasUnresolvedTypeParameter(arraySymbol.ElementType))
         {
-            AddIfMatches(
-                arraySymbol.ElementType.ToDisplayString(),
-                ArrayKind.CollectionExpression,
-                node,
-                rank: arraySymbol.Rank);
+            AddIfMatches(arraySymbol.ElementType.ToDisplayString(),
+                ArrayKind.CollectionExpression, node, rank: arraySymbol.Rank);
         }
         base.VisitCollectionExpression(node);
     }
@@ -86,28 +79,31 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
     // .ToArray(), Array.Empty<T>(), Enumerable.Repeat<T>() など
     public override void VisitInvocationExpression(InvocationExpressionSyntax node)
     {
-        if (_options.IncludeLinqAndMethodReturns)
+        if (_options.IncludeLinqAndMethodReturns
+            && _semanticModel.GetTypeInfo(node).Type is IArrayTypeSymbol arraySymbol
+            && !HasUnresolvedTypeParameter(arraySymbol.ElementType))
         {
-            var typeInfo = _semanticModel.GetTypeInfo(node);
-            if (typeInfo.Type is IArrayTypeSymbol arraySymbol)
+            var methodName = node.Expression switch
             {
-                var methodName = node.Expression switch
-                {
-                    MemberAccessExpressionSyntax m => m.Name.Identifier.Text,
-                    IdentifierNameSyntax i => i.Identifier.Text,
-                    _ => node.Expression.ToString(),
-                };
+                MemberAccessExpressionSyntax m => m.Name.Identifier.Text,
+                IdentifierNameSyntax i => i.Identifier.Text,
+                _ => node.Expression.ToString(),
+            };
 
-                AddIfMatches(
-                    arraySymbol.ElementType.ToDisplayString(),
-                    ArrayKind.MethodReturn,
-                    node,
-                    rank: arraySymbol.Rank,
-                    methodName: methodName);
-            }
+            AddIfMatches(arraySymbol.ElementType.ToDisplayString(),
+                ArrayKind.MethodReturn, node, rank: arraySymbol.Rank, methodName: methodName);
         }
         base.VisitInvocationExpression(node);
     }
+
+    /// T, TResult, List&lt;T&gt; など未解決型パラメータを含む場合 true
+    private static bool HasUnresolvedTypeParameter(ITypeSymbol type) => type switch
+    {
+        ITypeParameterSymbol => true,
+        IArrayTypeSymbol arr  => HasUnresolvedTypeParameter(arr.ElementType),
+        INamedTypeSymbol named => named.TypeArguments.Any(HasUnresolvedTypeParameter),
+        _ => false,
+    };
 
     private void AddIfMatches(
         string elementType,
