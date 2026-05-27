@@ -21,4 +21,6 @@ public sealed record ArrayUsageInfo
     public int Rank { get; init; } = 1;
     public string? SourceSnippet { get; init; }
     public string? MethodName { get; init; }
+    /// <summary>--count-refs / --zero-refs 有効時のみ設定。null = 未計上。</summary>
+    public int? ReferenceCount { get; init; }
 }

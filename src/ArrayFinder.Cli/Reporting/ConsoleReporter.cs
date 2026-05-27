@@ -42,6 +42,7 @@ public sealed class ConsoleReporter : IReporter
         AnsiConsole.Write(summaryTable);
 
         // 全件テーブル
+        var hasRefCounts = usages.Any(u => u.ReferenceCount.HasValue);
         AnsiConsole.WriteLine();
         var detailTable = new Table()
             .Title($"[bold cyan]配列使用一覧 ({usages.Count} 件)[/]")
@@ -53,6 +54,9 @@ public sealed class ConsoleReporter : IReporter
             .AddColumn("Type::Member")
             .AddColumn("Snippet")
             .Border(TableBorder.Simple);
+
+        if (hasRefCounts)
+            detailTable.AddColumn(new TableColumn("Refs").RightAligned());
 
         foreach (var u in usages)
         {
@@ -76,14 +80,28 @@ public sealed class ConsoleReporter : IReporter
                 ? Markup.Escape(s.Length > 50 ? s[..47] + "..." : s)
                 : "";
 
-            detailTable.AddRow(
+            var cells = new List<string>
+            {
                 $"[green]{Markup.Escape(u.ElementType)}[/]",
                 kindMarkup + Markup.Escape(methodHint),
                 u.Rank.ToString(),
                 Markup.Escape(fileName),
                 $"[grey]{u.Line}:{u.Column}[/]",
                 Markup.Escape(member),
-                $"[grey]{snippet}[/]");
+                $"[grey]{snippet}[/]",
+            };
+
+            if (hasRefCounts)
+            {
+                cells.Add(u.ReferenceCount switch
+                {
+                    null => "[grey]-[/]",
+                    0 => "[red bold]0[/]",
+                    int n => n.ToString(),
+                });
+            }
+
+            detailTable.AddRow(cells.ToArray());
         }
         AnsiConsole.Write(detailTable);
 

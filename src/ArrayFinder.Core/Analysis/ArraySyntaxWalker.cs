@@ -11,8 +11,11 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
     private readonly string _filePath;
     private readonly AnalysisOptions _options;
     private readonly List<ArrayUsageInfo> _results = [];
+    private readonly List<ISymbol?> _symbols = [];
 
     public IReadOnlyList<ArrayUsageInfo> Results => _results;
+    /// <summary>Results と並列。CountReferences が false のときは全て null。</summary>
+    public IReadOnlyList<ISymbol?> Symbols => _symbols;
 
     public ArraySyntaxWalker(SemanticModel semanticModel, string filePath, AnalysisOptions options)
         : base(SyntaxWalkerDepth.Node)
@@ -31,11 +34,29 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
             if (_semanticModel.GetTypeInfo(node).Type is IArrayTypeSymbol arraySymbol
                 && !HasUnresolvedTypeParameter(arraySymbol.ElementType))
             {
+                var declSymbol = _options.CountReferences ? TryGetDeclaredSymbol(node) : null;
                 AddIfMatches(arraySymbol.ElementType.ToDisplayString(),
-                    ArrayKind.TypeDeclaration, node, rank: arraySymbol.Rank);
+                    ArrayKind.TypeDeclaration, node, rank: arraySymbol.Rank, symbol: declSymbol);
             }
         }
         base.VisitArrayType(node);
+    }
+
+    /// <summary>TypeDeclaration ノードの宣言シンボルを返す。取得できない場合は null。</summary>
+    private ISymbol? TryGetDeclaredSymbol(ArrayTypeSyntax node)
+    {
+        switch (node.Parent)
+        {
+            case ParameterSyntax param:
+                return _semanticModel.GetDeclaredSymbol(param);
+            case PropertyDeclarationSyntax prop:
+                return _semanticModel.GetDeclaredSymbol(prop);
+            case VariableDeclarationSyntax varDecl when varDecl.Variables.Count > 0:
+                // 複数宣言 (int[] a, b) は先頭変数のシンボルで代表
+                return _semanticModel.GetDeclaredSymbol(varDecl.Variables[0]);
+            default:
+                return null; // メソッド戻り値など: メソッドシンボルは参照数の意味が異なるため除外
+        }
     }
 
     // new int[] { } / new int[3]
@@ -110,7 +131,8 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
         ArrayKind kind,
         SyntaxNode node,
         int rank = 1,
-        string? methodName = null)
+        string? methodName = null,
+        ISymbol? symbol = null)
     {
         if (_options.FilterElementTypes is { Count: > 0 } filter)
         {
@@ -138,6 +160,7 @@ internal sealed class ArraySyntaxWalker : CSharpSyntaxWalker
             SourceSnippet = _options.IncludeSnippets ? TruncateSnippet(node.ToString()) : null,
             MethodName = methodName,
         });
+        _symbols.Add(symbol);
     }
 
     private static (string containingType, string containingMember) GetContainingContext(SyntaxNode node)

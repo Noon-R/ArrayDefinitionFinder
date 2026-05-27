@@ -28,16 +28,17 @@ public sealed class MarkdownReporter : IReporter
         // 全件テーブル
         await writer.WriteLineAsync("## All Usages");
         await writer.WriteLineAsync();
-        await writer.WriteLineAsync("| Element Type | Kind | Rank | File | Line | Containing Type | Member | Snippet |");
-        await writer.WriteLineAsync("|---|---|---|---|---|---|---|---|");
+        await writer.WriteLineAsync("| Element Type | Kind | Rank | File | Line | Containing Type | Member | Snippet | Refs |");
+        await writer.WriteLineAsync("|---|---|---|---|---|---|---|---|---|");
 
         foreach (var u in usages)
         {
             ct.ThrowIfCancellationRequested();
             var file = Path.GetFileName(u.FilePath);
             var snippet = u.SourceSnippet is { } s ? $"`{s.Replace("`", "'")}`" : "";
+            var refs = u.ReferenceCount?.ToString() ?? "";
             await writer.WriteLineAsync(
-                $"| `{u.ElementType}` | {u.Kind} | {u.Rank} | {file} | {u.Line} | {u.ContainingType} | {u.ContainingMember} | {snippet} |");
+                $"| `{u.ElementType}` | {u.Kind} | {u.Rank} | {file} | {u.Line} | {u.ContainingType} | {u.ContainingMember} | {snippet} | {refs} |");
         }
     }
 }

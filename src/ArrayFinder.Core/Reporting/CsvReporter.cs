@@ -6,7 +6,7 @@ public sealed class CsvReporter : IReporter
 {
     public async Task WriteAsync(IReadOnlyList<ArrayUsageInfo> usages, TextWriter writer, CancellationToken ct = default)
     {
-        await writer.WriteLineAsync("ElementType,Kind,Rank,FilePath,Line,Column,ContainingType,ContainingMember,MethodName,Snippet");
+        await writer.WriteLineAsync("ElementType,Kind,Rank,FilePath,Line,Column,ContainingType,ContainingMember,MethodName,Snippet,ReferenceCount");
 
         foreach (var u in usages)
         {
@@ -21,7 +21,8 @@ public sealed class CsvReporter : IReporter
                 $"{Escape(u.ContainingType)}," +
                 $"{Escape(u.ContainingMember)}," +
                 $"{Escape(u.MethodName ?? "")}," +
-                $"{Escape(u.SourceSnippet ?? "")}");
+                $"{Escape(u.SourceSnippet ?? "")}," +
+                $"{u.ReferenceCount?.ToString() ?? ""}");
         }
     }
 

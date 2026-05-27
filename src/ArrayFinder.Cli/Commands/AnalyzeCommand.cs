@@ -43,6 +43,24 @@ internal sealed class AnalyzeCommand : AsyncCommand<AnalyzeCommand.Settings>
         [DefaultValue("file")]
         [Description("ソート順: file, type, kind")]
         public string Sort { get; init; } = "file";
+
+        [CommandOption("--path-include")]
+        [Description("含めるファイルパスのパターン（カンマ区切り。部分一致 or glob。例: src/MyModule,**/*.cs）")]
+        public string? PathInclude { get; init; }
+
+        [CommandOption("--path-exclude")]
+        [Description("除外するファイルパスのパターン（カンマ区切り。例: tests/**,**/*.Designer.cs,obj/）")]
+        public string? PathExclude { get; init; }
+
+        [CommandOption("--count-refs")]
+        [DefaultValue(false)]
+        [Description("TypeDeclaration 宣言の参照数を計上する（処理時間が増加します）")]
+        public bool CountRefs { get; init; }
+
+        [CommandOption("--zero-refs")]
+        [DefaultValue(false)]
+        [Description("参照数ゼロの宣言のみ表示する（--count-refs が自動的に有効になります）")]
+        public bool ZeroRefsOnly { get; init; }
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings)
@@ -63,6 +81,9 @@ internal sealed class AnalyzeCommand : AsyncCommand<AnalyzeCommand.Settings>
             FilterElementTypes = settings.FilterType?.Split(',', StringSplitOptions.RemoveEmptyEntries)
                                                       .Select(s => s.Trim())
                                                       .ToList(),
+            IncludePathPatterns = SplitPatterns(settings.PathInclude),
+            ExcludePathPatterns = SplitPatterns(settings.PathExclude),
+            CountReferences = settings.CountRefs || settings.ZeroRefsOnly,
         };
 
         var analyzer = new ProjectAnalyzer(options);
@@ -86,6 +107,8 @@ internal sealed class AnalyzeCommand : AsyncCommand<AnalyzeCommand.Settings>
         }
 
         var usages = ApplySort(result.Usages, settings.Sort);
+        if (settings.ZeroRefsOnly)
+            usages = usages.Where(u => u.ReferenceCount == 0).ToList();
         var reporter = CreateReporter(settings.Format);
 
         if (settings.Output is { } outputPath)
@@ -111,6 +134,12 @@ internal sealed class AnalyzeCommand : AsyncCommand<AnalyzeCommand.Settings>
 
         return 0;
     }
+
+    private static IReadOnlyList<string>? SplitPatterns(string? value) =>
+        value?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+              .Select(s => s.Trim())
+              .Where(s => s.Length > 0)
+              .ToList() is { Count: > 0 } list ? list : null;
 
     private static string? ResolvePath(string? path)
     {
