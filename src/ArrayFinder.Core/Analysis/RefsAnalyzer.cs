@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using ArrayFinder.Core.Models;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
@@ -54,8 +55,15 @@ public sealed class RefsAnalyzer
             await CollectFromProjectAsync(project, collected, progress, cancellationToken);
         }
 
+        // FilePath が null のドキュメントを SymbolFinder から除外する
+        // （source generator 等の生成ファイルで Path.Combine(null, ...) が発生するため）
+        var searchDocuments = workspace.CurrentSolution.Projects
+            .SelectMany(p => p.Documents)
+            .Where(d => d.FilePath is not null)
+            .ToImmutableHashSet();
+
         var declarations = await CountReferencesAsync(
-            collected, workspace.CurrentSolution, progress, cancellationToken);
+            collected, workspace.CurrentSolution, searchDocuments, progress, cancellationToken);
 
         return new RefsAnalysisResult(declarations, warnings);
     }
@@ -77,7 +85,10 @@ public sealed class RefsAnalyzer
             if (!document.SupportsSyntaxTree) continue;
             cancellationToken.ThrowIfCancellationRequested();
 
-            var filePath = document.FilePath ?? document.Name;
+            // FilePath が null のドキュメント（生成ファイル等）は収集対象から除外
+            var filePath = document.FilePath;
+            if (string.IsNullOrEmpty(filePath)) continue;
+
             if (!IsPathIncluded(filePath)) continue;
 
             var tree = await document.GetSyntaxTreeAsync(cancellationToken);
@@ -95,6 +106,7 @@ public sealed class RefsAnalyzer
     private static async Task<IReadOnlyList<SymbolDeclarationInfo>> CountReferencesAsync(
         List<(SymbolDeclarationInfo Info, ISymbol Symbol)> items,
         Solution solution,
+        ImmutableHashSet<Document> searchDocuments,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
@@ -108,7 +120,9 @@ public sealed class RefsAnalyzer
             cancellationToken.ThrowIfCancellationRequested();
             if (refCounts.ContainsKey(symbol)) { done++; continue; }
 
-            var refs = await SymbolFinder.FindReferencesAsync(symbol, solution, cancellationToken);
+            // FilePath が null のドキュメントを除外した集合で検索
+            var refs = await SymbolFinder.FindReferencesAsync(
+                symbol, solution, searchDocuments, cancellationToken);
             refCounts[symbol] = refs.Sum(r => r.Locations.Count());
 
             done++;
